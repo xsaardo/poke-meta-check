@@ -3,6 +3,10 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://poke:poke_secret@localhost:5432/poke_meta"
+
+    @property
+    def async_database_url(self) -> str:
+        return self.database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
     allow_manual_scrape: bool = False
     scraper_workers: int = 1
     scraper_delay_seconds: float = 6.0
