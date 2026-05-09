@@ -77,27 +77,35 @@ async def sync_cards() -> dict:
     all_cards = []
     page = 1
 
+    import asyncio as _asyncio
     async with httpx.AsyncClient(timeout=30) as client:
         while True:
-            try:
-                resp = await client.get(
-                    f"{POKEMONTCG_API}/cards",
-                    params={"pageSize": PAGE_SIZE, "page": page, "orderBy": "id"},
-                    headers=headers,
-                )
-                resp.raise_for_status()
-                data = resp.json()
-            except Exception as exc:
-                logger.error("Failed to fetch cards page %d: %s", page, exc)
+            batch = []
+            for attempt in range(4):
+                try:
+                    resp = await client.get(
+                        f"{POKEMONTCG_API}/cards",
+                        params={"pageSize": PAGE_SIZE, "page": page, "orderBy": "id"},
+                        headers=headers,
+                    )
+                    resp.raise_for_status()
+                    batch = resp.json().get("data", [])
+                    break
+                except Exception as exc:
+                    wait = 5 * (attempt + 1)
+                    logger.warning("Page %d attempt %d failed: %s — retrying in %ds", page, attempt + 1, exc, wait)
+                    await _asyncio.sleep(wait)
+            else:
+                logger.error("Failed to fetch page %d after 4 attempts, stopping", page)
                 break
 
-            batch = data.get("data", [])
             all_cards.extend(batch)
             logger.info("Fetched page %d: %d cards (total so far: %d)", page, len(batch), len(all_cards))
 
             if len(batch) < PAGE_SIZE:
                 break
             page += 1
+            await _asyncio.sleep(0.5)
 
     logger.info("Total cards fetched: %d", len(all_cards))
 
