@@ -65,19 +65,43 @@ def _derive_card_id(card: dict) -> str:
     return f"{ptcgo_code}-{number}"
 
 
+async def _upsert_page(rows: list[dict]) -> None:
+    """Upsert a single page of card rows into the DB."""
+    async with AsyncSessionLocal() as session:
+        stmt = insert(Card).values(rows)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["id"],
+            set_={
+                "name": stmt.excluded.name,
+                "supertype": stmt.excluded.supertype,
+                "subtypes": stmt.excluded.subtypes,
+                "set_code": stmt.excluded.set_code,
+                "number": stmt.excluded.number,
+                "rarity": stmt.excluded.rarity,
+                "image_path": stmt.excluded.image_path,
+                "card_group": stmt.excluded.card_group,
+                "synced_at": stmt.excluded.synced_at,
+            },
+        )
+        await session.execute(stmt)
+        await session.commit()
+
+
 async def sync_cards() -> dict:
     """Fetch all cards from pokemontcg.io, upsert into the local cards table."""
+    import asyncio as _asyncio
+
     headers = _api_headers()
 
     # Step 1: sync sets first
     await _sync_sets(headers)
 
-    # Step 2: fetch all cards (paginated)
+    # Step 2: fetch and upsert cards page-by-page to avoid accumulating all in memory
     logger.info("Fetching all cards from pokemontcg.io…")
-    all_cards = []
     page = 1
+    total_upserted = 0
+    memberships: list[tuple[str, str]] = []
 
-    import asyncio as _asyncio
     async with httpx.AsyncClient(timeout=30) as client:
         while True:
             batch = []
@@ -99,70 +123,49 @@ async def sync_cards() -> dict:
                 logger.error("Failed to fetch page %d after 4 attempts, stopping", page)
                 break
 
-            all_cards.extend(batch)
-            logger.info("Fetched page %d: %d cards (total so far: %d)", page, len(batch), len(all_cards))
+            # Deduplicate within the page by derived card ID
+            now = datetime.now(timezone.utc)
+            by_id: dict[str, dict] = {}
+            for card in batch:
+                card_id = _derive_card_id(card)
+                set_info = card.get("set", {})
+                ptcgo_code = set_info.get("ptcgoCode") or set_info.get("id", "").upper()
+                row = {
+                    "id": card_id,
+                    "name": card["name"],
+                    "supertype": card.get("supertype", ""),
+                    "subtypes": ",".join(card.get("subtypes") or []) or None,
+                    "set_code": ptcgo_code or None,
+                    "number": card.get("number") or None,
+                    "rarity": card.get("rarity") or None,
+                    "image_path": (card.get("images") or {}).get("small") or None,
+                    "card_group": _compute_card_group(card),
+                    "synced_at": now,
+                }
+                existing = by_id.get(card_id)
+                if existing is None or (row["image_path"] and not existing["image_path"]):
+                    by_id[card_id] = row
+
+                set_id = (card.get("set") or {}).get("id")
+                if set_id:
+                    memberships.append((card_id, set_id))
+
+            if by_id:
+                await _upsert_page(list(by_id.values()))
+                total_upserted += len(by_id)
+
+            logger.info("Page %d: upserted %d cards (running total: %d)", page, len(by_id), total_upserted)
 
             if len(batch) < PAGE_SIZE:
                 break
             page += 1
             await _asyncio.sleep(0.5)
 
-    logger.info("Total cards fetched: %d", len(all_cards))
+    # Step 3: sync set memberships from collected pairs
+    await _sync_card_set_memberships_from_pairs(memberships)
 
-    # Step 3: upsert cards
-    now = datetime.now(timezone.utc)
-    by_id: dict[str, dict] = {}
-    for card in all_cards:
-        card_id = _derive_card_id(card)
-        set_info = card.get("set", {})
-        ptcgo_code = set_info.get("ptcgoCode") or set_info.get("id", "").upper()
-
-        row = {
-            "id": card_id,
-            "name": card["name"],
-            "supertype": card.get("supertype", ""),
-            "subtypes": ",".join(card.get("subtypes") or []) or None,
-            "set_code": ptcgo_code or None,
-            "number": card.get("number") or None,
-            "rarity": card.get("rarity") or None,
-            "image_path": (card.get("images") or {}).get("small") or None,
-            "card_group": _compute_card_group(card),
-            "synced_at": now,
-        }
-        # Multiple sets can share a ptcgoCode (e.g. Hidden Fates + Shiny Vault),
-        # producing the same card_id. Keep the entry with an image if possible.
-        existing = by_id.get(card_id)
-        if existing is None or (row["image_path"] and not existing["image_path"]):
-            by_id[card_id] = row
-
-    rows = list(by_id.values())
-
-    async with AsyncSessionLocal() as session:
-        for i in range(0, len(rows), BATCH_SIZE):
-            batch = rows[i: i + BATCH_SIZE]
-            stmt = insert(Card).values(batch)
-            stmt = stmt.on_conflict_do_update(
-                index_elements=["id"],
-                set_={
-                    "name": stmt.excluded.name,
-                    "supertype": stmt.excluded.supertype,
-                    "subtypes": stmt.excluded.subtypes,
-                    "set_code": stmt.excluded.set_code,
-                    "number": stmt.excluded.number,
-                    "rarity": stmt.excluded.rarity,
-                    "image_path": stmt.excluded.image_path,
-                    "card_group": stmt.excluded.card_group,
-                    "synced_at": stmt.excluded.synced_at,
-                },
-            )
-            await session.execute(stmt)
-        await session.commit()
-
-    # Step 4: sync set memberships
-    await _sync_card_set_memberships(all_cards)
-
-    logger.info("Card sync complete: %d cards", len(rows))
-    return {"cards": len(rows)}
+    logger.info("Card sync complete: %d cards across %d pages", total_upserted, page)
+    return {"cards": total_upserted}
 
 
 async def _sync_sets(headers: dict) -> None:
@@ -231,16 +234,8 @@ async def _sync_sets(headers: dict) -> None:
     logger.info("Set sync complete: %d sets", len(rows))
 
 
-async def _sync_card_set_memberships(all_cards: list[dict]) -> None:
-    """Rebuild card→set membership records."""
-    # Build (card_id, set_id) pairs using pokemontcg.io set ids
-    memberships: list[tuple[str, str]] = []
-    for card in all_cards:
-        card_id = _derive_card_id(card)
-        set_id = (card.get("set") or {}).get("id")
-        if set_id:
-            memberships.append((card_id, set_id))
-
+async def _sync_card_set_memberships_from_pairs(memberships: list[tuple[str, str]]) -> None:
+    """Rebuild card→set membership records from (card_id, set_id) pairs."""
     if not memberships:
         return
 
@@ -257,6 +252,4 @@ async def _sync_card_set_memberships(all_cards: list[dict]) -> None:
 
         await session.commit()
 
-    logger.info(
-        "Card set membership sync complete: %d memberships", len(memberships)
-    )
+    logger.info("Card set membership sync complete: %d memberships", len(memberships))
