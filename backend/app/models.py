@@ -27,6 +27,7 @@ class Card(Base):
     rarity: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     image_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)  # CDN URL
     card_group: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    regulation_mark: Mapped[Optional[str]] = mapped_column(String(10), nullable=True, index=True)
     synced_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 

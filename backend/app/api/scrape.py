@@ -2,6 +2,8 @@
 
 import asyncio
 import logging
+import sys
+import os
 
 from fastapi import APIRouter, HTTPException
 
@@ -14,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 _scrape_running = False
 _card_sync_running = False
+_group_backfill_running = False
 
 
 @router.post("/scrape/trigger")

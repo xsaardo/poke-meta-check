@@ -80,6 +80,7 @@ async def _upsert_page(rows: list[dict]) -> None:
                 "rarity": stmt.excluded.rarity,
                 "image_path": stmt.excluded.image_path,
                 "card_group": stmt.excluded.card_group,
+                "regulation_mark": stmt.excluded.regulation_mark,
                 "synced_at": stmt.excluded.synced_at,
             },
         )
@@ -109,7 +110,12 @@ async def sync_cards() -> dict:
                 try:
                     resp = await client.get(
                         f"{POKEMONTCG_API}/cards",
-                        params={"pageSize": PAGE_SIZE, "page": page, "orderBy": "id"},
+                        params={
+                            "pageSize": PAGE_SIZE,
+                            "page": page,
+                            "orderBy": "id",
+                            "q": "regulationMark:H OR regulationMark:I OR regulationMark:J",
+                        },
                         headers=headers,
                     )
                     resp.raise_for_status()
@@ -140,6 +146,7 @@ async def sync_cards() -> dict:
                     "rarity": card.get("rarity") or None,
                     "image_path": (card.get("images") or {}).get("small") or None,
                     "card_group": _compute_card_group(card),
+                    "regulation_mark": card.get("regulationMark") or None,
                     "synced_at": now,
                 }
                 existing = by_id.get(card_id)

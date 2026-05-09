@@ -103,6 +103,7 @@ async def list_sets(
         )
         .outerjoin(card_count_sq, card_count_sq.c.set_id == CardSet.id)
         .outerjoin(meta_sq, meta_sq.c.set_id == CardSet.id)
+        .where(func.coalesce(card_count_sq.c.card_count, 0) > 0)
         .order_by(CardSet.release_date.desc().nulls_last(), CardSet.name)
     )
 
