@@ -146,7 +146,7 @@ function SetDetailView({ setName, months }: { setName: string; months: number })
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [metaOnly, setMetaOnly] = useState(false);
-  const [sortAlpha, setSortAlpha] = useState(false);
+  const [sort, setSort] = useState<"meta" | "alpha" | "number">("meta");
   const [prices, setPrices] = useState<Record<string, CardPrices>>({});
 
   useEffect(() => {
@@ -183,7 +183,15 @@ function SetDetailView({ setName, months }: { setName: string; months: number })
   const displayed = cards
     ? (metaOnly ? cards.filter((c) => c.tournament_count > 0) : cards)
         .slice()
-        .sort((a, b) => sortAlpha ? a.name.localeCompare(b.name) : 0)
+        .sort((a, b) => {
+          if (sort === "alpha") return a.name.localeCompare(b.name);
+          if (sort === "number") {
+            const numA = a.id.split("-").slice(1).join("-");
+            const numB = b.id.split("-").slice(1).join("-");
+            return numA.localeCompare(numB, undefined, { numeric: true });
+          }
+          return 0;
+        })
     : [];
 
   const metaCount = cards ? cards.filter((c) => c.tournament_count > 0).length : 0;
@@ -227,16 +235,24 @@ function SetDetailView({ setName, months }: { setName: string; months: number })
             );
           })}
         </div>
-        <button
-          onClick={() => setSortAlpha((s) => !s)}
-          className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
-            sortAlpha
-              ? "bg-[#CC0000] text-white"
-              : "bg-white text-[#888888] border border-gray-200 hover:border-[#CC0000]"
-          }`}
-        >
-          A–Z
-        </button>
+        <div className="flex gap-2">
+          {(["A–Z", "1–9"] as const).map((label) => {
+            const mode = label === "A–Z" ? "alpha" : "number";
+            return (
+              <button
+                key={label}
+                onClick={() => setSort((s) => s === mode ? "meta" : mode)}
+                className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                  sort === mode
+                    ? "bg-[#CC0000] text-white"
+                    : "bg-white text-[#888888] border border-gray-200 hover:border-[#CC0000]"
+                }`}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {loading && <p className="text-center text-[#888888] py-12">Loading cards…</p>}
