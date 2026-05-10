@@ -146,6 +146,7 @@ function SetDetailView({ setName, months }: { setName: string; months: number })
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [metaOnly, setMetaOnly] = useState(false);
+  const [sortAlpha, setSortAlpha] = useState(false);
   const [prices, setPrices] = useState<Record<string, CardPrices>>({});
 
   useEffect(() => {
@@ -180,9 +181,9 @@ function SetDetailView({ setName, months }: { setName: string; months: number })
   }, [cards]);
 
   const displayed = cards
-    ? metaOnly
-      ? cards.filter((c) => c.tournament_count > 0)
-      : cards
+    ? (metaOnly ? cards.filter((c) => c.tournament_count > 0) : cards)
+        .slice()
+        .sort((a, b) => sortAlpha ? a.name.localeCompare(b.name) : 0)
     : [];
 
   const metaCount = cards ? cards.filter((c) => c.tournament_count > 0).length : 0;
@@ -207,23 +208,35 @@ function SetDetailView({ setName, months }: { setName: string; months: number })
         </p>
       )}
 
-      <div className="flex gap-2 mb-6">
-        {(["All cards", "Meta relevant only"] as const).map((label, i) => {
-          const active = i === 0 ? !metaOnly : metaOnly;
-          return (
-            <button
-              key={label}
-              onClick={() => setMetaOnly(i === 1)}
-              className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
-                active
-                  ? "bg-[#CC0000] text-white"
-                  : "bg-white text-[#888888] border border-gray-200 hover:border-[#CC0000]"
-              }`}
-            >
-              {label}
-            </button>
-          );
-        })}
+      <div className="flex items-center justify-between gap-2 mb-6">
+        <div className="flex gap-2">
+          {(["All cards", "Meta relevant only"] as const).map((label, i) => {
+            const active = i === 0 ? !metaOnly : metaOnly;
+            return (
+              <button
+                key={label}
+                onClick={() => setMetaOnly(i === 1)}
+                className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                  active
+                    ? "bg-[#CC0000] text-white"
+                    : "bg-white text-[#888888] border border-gray-200 hover:border-[#CC0000]"
+                }`}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+        <button
+          onClick={() => setSortAlpha((s) => !s)}
+          className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
+            sortAlpha
+              ? "bg-[#CC0000] text-white"
+              : "bg-white text-[#888888] border border-gray-200 hover:border-[#CC0000]"
+          }`}
+        >
+          A–Z
+        </button>
       </div>
 
       {loading && <p className="text-center text-[#888888] py-12">Loading cards…</p>}
