@@ -8,6 +8,8 @@ import { Footer } from "../components/Footer";
 import {
   getSets,
   getSetCards,
+  getCardPrices,
+  type CardPrices,
   type SetCard,
   type SetSummary,
 } from "../lib/api";
@@ -144,10 +146,12 @@ function SetDetailView({ setName, months }: { setName: string; months: number })
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [metaOnly, setMetaOnly] = useState(false);
+  const [prices, setPrices] = useState<Record<string, CardPrices>>({});
 
   useEffect(() => {
     setLoading(true);
     setError(null);
+    setPrices({});
     getSetCards(setName, months)
       .then((data) => {
         if (!data) setError("Failed to load set cards.");
@@ -155,6 +159,25 @@ function SetDetailView({ setName, months }: { setName: string; months: number })
       })
       .finally(() => setLoading(false));
   }, [setName, months]);
+
+  useEffect(() => {
+    if (!cards) return;
+    const metaCards = cards.filter((c) => c.tournament_count > 0);
+    Promise.all(
+      metaCards.map(async (card) => {
+        const [setCode, ...rest] = card.id.split("-");
+        const cardNumber = rest.join("-");
+        const price = await getCardPrices(setCode, cardNumber);
+        return { id: card.id, price };
+      })
+    ).then((results) => {
+      const map: Record<string, CardPrices> = {};
+      for (const { id, price } of results) {
+        if (price) map[id] = price;
+      }
+      setPrices(map);
+    });
+  }, [cards]);
 
   const displayed = cards
     ? metaOnly
@@ -251,6 +274,20 @@ function SetDetailView({ setName, months }: { setName: string; months: number })
                   </span>
                 ) : (
                   <span className="mt-auto text-[#888888] text-xs">Not meta</span>
+                )}
+                {prices[card.id] && (
+                  <div className="flex flex-col gap-0.5 mt-1">
+                    {prices[card.id].tcgplayer && (
+                      <span className="text-xs text-[#888888]">
+                        TCG <span className="font-semibold text-[#111111]">${prices[card.id].tcgplayer}</span>
+                      </span>
+                    )}
+                    {prices[card.id].cardmarket && (
+                      <span className="text-xs text-[#888888]">
+                        CM <span className="font-semibold text-[#111111]">€{prices[card.id].cardmarket}</span>
+                      </span>
+                    )}
+                  </div>
                 )}
               </div>
             </Link>
